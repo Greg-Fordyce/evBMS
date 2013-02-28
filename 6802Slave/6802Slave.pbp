@@ -87,9 +87,10 @@
 ' Command $10 (STCVAD) = Start Cell Voltage A/D conversion
 ' Command $20 (STOWAD) = Start Open-Wire A/D conversion
 ' Command $30 (STMPAD) = Start Temperature A/D conversion
+' Command 200          = Start A/D and read cell voltages in one command.
 	
 '*******************************************************************************
-'********************* Program Size 1655 out of 8192 Words *********************
+'********************* Program Size 1676 out of 8192 Words *********************
 '*******************************************************************************
 
   #CONFIG
@@ -128,7 +129,7 @@ x        var byte
 y        var byte
 crcIndex var byte           ' Holds index value for crc table lookups
 crcValue var byte           ' Holds crc table value found at crcIndex
-command  var byte[2]        ' Commands from master, 2nd byte is crc
+command  var byte           ' Commands from master
 cfgReg   var byte[7]        ' 6802 configuration registers + crc byte
 RawCV    var byte[19]       ' Cell voltage register + crc byte
 cellT    var byte[6]        ' Cell temperature register + crc byte
@@ -143,7 +144,6 @@ SCKI     var  PORTC.0       ' SPI bus clock
 MISO     VAR  PORTC.1       ' SPI Master in Slave out
 MOSI     var  PORTC.2       ' SPI Master out Slave in
 CV_byte  var  cellV.BYTE0   ' Enable byte access to CellV word array
-'SlvOut  var  PORTC.3       ' Slave bus out **USING DEBUG FOR SLAVE OUT**
 
 Start:
 
@@ -153,21 +153,7 @@ low grnled
 
 Incomming:
 
-' Commands sent from master will be 2 bytes. 1st byte is command and second byte
-' is crc value from lookup table. Slave will check against it's own lookup table
-' to determine if command is valid. 
-
-'for x = 0 to 1              ' Recieve command byte and crc byte on slave bus
-debugin 2000,Timeout,[command]'[x]]
-'next x
-
-'crcIndex = command[0]       ' Set pointer to lookup table
-'gosub crctable              ' Get value from crc table and compare to recieved
-                            ' crc byte 
-'If crcvalue <> command[1] then 
- '   high redLed : low grnLed
- '   goto incomming    ' crc lookup failed, command invalid
-'endif
+debugin 2000,Timeout,[command]   ' Recieve command from master/previous slave
 
 low redLed
                     '--- Start A/D Conversions
@@ -177,30 +163,10 @@ if (command = $10) or (command = $20) or (command = $30) then
 ' Command $20 (STOWAD)  Start Open-wire A/D conversions 
 ' Command $30 (STTMPAD) Start Temperature A/D conversions
 
-'high redled
-
 ' We are going to forward the command onto the next slaves before sending the
-' command on the SPI bus so that all A/D conversions start as close together as
-' possible. 
-    'for x = 0 to 1                      ' Send $x0 to next slave on slave bus
-    debug command'[x]
-    'next x
-
-    ''''''''''''''' Initialize 6802 '''''''''''''''''''''''''
-    high CSBI
-    shiftout MOSI, SCKI, 5,[$01]
-    shiftout MOSI, SCKI, 5,[%01100010]
-    for x = 1 to 5
-     shiftout MOSI, SCKI, 5,[%00000000]
-    next x
-    low csbi
-    pause 1
-
-
-    high CSBI                           ' Pull CSBI low (opto inverts levels)
-    shiftout mosi, scki, 5, [command]   ' Send $x0 to 6802
-    pause 15                            ' Wait for A/D to finish
-    low csbi                            ' Command finished, CSBI high
+' command on the SPI bus so that all A/D conversions start close together. 
+    debug command
+    gosub Initialize                    ' Initalize 6802 with [command]
     GOTO INCOMMING                      ' Go back and wait for the next command 
 endif    
                     
@@ -220,27 +186,11 @@ IF COMMAND = $02 THEN       ' (RDCFG) Read configuration register on 6802
     next x
     low csbi                            ' Command finished, CSBI high
     
- '   crcindex = cfgreg                   ' Start crc check
- '   for x = 1 to 6
- '       gosub crctable                  ' Step through crc table
- '       crcindex = cfgreg[x] XOR crcvalue
- '   next x
-    
- '   if crcindex = 0 then                ' crc check passed
- '       low redLed : high grnLed
     for x = 0 to 6
         hserout [cfgreg[x]]         ' Send config register and crc byte on 
     next x                          ' master bus
- '   else
- '       high redLed : low grnLed
- '       hserout ["Error"]               ' crc failed, send "Error" on master bus
- '   endif
-    
-    'for x = 0 to 1                      ' Send $02 to next slave on slave bus
-    debug command'[x]
-    'next x
-    
-    goto Incomming                      ' Go back and wait for the next command
+    debug command    
+    goto Incomming                  ' Go back and wait for the next command
 endif
 
                     '--- Software Version ---'
@@ -248,14 +198,101 @@ endif
 IF COMMAND = $03 THEN                   ' Report Software Version of slave
     hserout ["Version 02"]              ' on master bus
     pause 5
-    debug command'[x]
+    debug command
     goto Incomming                      ' Go back and wait for the next command
 endif               
 
                     '--- RDCV ---'
 
 IF COMMAND = $04 THEN       ' (RDCV) Read cell voltage register on 6802
+    gosub rdcv    
+    goto Incomming                      ' Go back and wait for the next command
+endif
+
+                    
+IF COMMAND = $07 THEN                   
+    Low grnled
+    high redled                         ' Turn on red led
+    pause 250
+    debug command'[x]                   ' Send $07 to next slave on slave bus
+    pause 250
+    low redled                          ' turn off red led
+    High grnled
+    goto Incomming                      ' Go back and wait for the next command
+endif
+
+                    '--- RDTMP ---'
+
+IF COMMAND = $08 THEN       ' (RDTMP) Read cell temperature register on 6802
     high CSBI               ' Pull CSBI low (opto inverts levels)
+    shiftout mosi, scki, 5,[command]    ' Send RDTMP to 6802
+    for x = 0 to 18
+    shiftin miso, scki, 6,[cellT[x]]    ' Recieve 18 RawCV bytes + crc byte
+    next x
+    low csbi                            ' Command finished, CSBI high
+    
+    crcindex = cellT                    ' Start crc check
+    for x = 1 to 18
+        gosub crctable                  ' Step through crc table
+        crcindex = cellT[x] XOR crcvalue
+    next x
+    
+    if crcindex = 0 then                ' crc check passed
+        low redLed : high grnLed
+        for x = 0 to 6
+            hserout [cellT[x]]          ' Send cell temperature and crc byte on 
+        next x                          ' master bus
+    else
+        high redLed : low grnLed
+        hserout ["Error"]               ' crc failed, send "Error" on master bus
+    endif
+    
+        debug command
+    
+    goto Incomming                      ' Go back and wait for the next command
+endif
+
+if command = 200 then
+    command = $10 ' Command $10 (STCVAD)  Start cell voltage A/D conversions 
+    
+' We are going to forward the command onto the next slaves before sending the
+' command on the SPI bus so that all A/D conversions start close together. 
+    debug command
+    gosub Initialize                    ' Initalize 6802 with [command]
+    
+    command = $04                       ' Now we need to read cell voltages
+    gosub rdcv
+    
+    GOTO INCOMMING                      ' Go back and wait for the next command 
+endif    
+
+
+Timeout:
+    low grnLed : low redLed
+    goto Incomming                      ' Go back and wait for the next command
+    
+stop
+
+Initialize:
+   ''''''''''''''' Initialize 6802 '''''''''''''''''''''''''
+    high CSBI
+    shiftout MOSI, SCKI, 5,[$01]
+    shiftout MOSI, SCKI, 5,[%01100010]
+    for x = 1 to 5
+     shiftout MOSI, SCKI, 5,[%00000000]
+    next x
+    low csbi
+    pause 1
+
+
+    high CSBI                           ' Pull CSBI low (opto inverts levels)
+    shiftout mosi, scki, 5, [command]   ' Send $x0 to 6802
+    pause 15                            ' Wait for A/D to finish
+    low csbi                            ' Command finished, CSBI high
+Return
+
+RDCV:
+        high CSBI               ' Pull CSBI low (opto inverts levels)
     shiftout mosi, scki, 5,[command] ' Send RDCV to 6802
     for x = 0 to 18
         shiftin miso, scki, 6,[RawCV[x]] ' Recieve 18 RawCV bytes + crc byte
@@ -311,61 +348,8 @@ IF COMMAND = $04 THEN       ' (RDCV) Read cell voltage register on 6802
     next y                               
     
     debug command'[x]                   Output on slave bus
-        
-    goto Incomming                      ' Go back and wait for the next command
-endif
 
-                    
-IF COMMAND = $07 THEN                   
-    Low grnled
-    high redled                         ' Turn on red led
-    pause 250
-    debug command'[x]                   ' Send $07 to next slave on slave bus
-    pause 250
-    low redled                          ' turn off red led
-    High grnled
-    goto Incomming                      ' Go back and wait for the next command
-endif
-
-                    '--- RDTMP ---'
-
-IF COMMAND = $08 THEN       ' (RDTMP) Read cell temperature register on 6802
-    high CSBI               ' Pull CSBI low (opto inverts levels)
-    shiftout mosi, scki, 5,[command]    ' Send RDTMP to 6802
-    for x = 0 to 18
-    shiftin miso, scki, 6,[cellT[x]]    ' Recieve 18 RawCV bytes + crc byte
-    next x
-    low csbi                            ' Command finished, CSBI high
-    
-    crcindex = cellT                    ' Start crc check
-    for x = 1 to 18
-        gosub crctable                  ' Step through crc table
-        crcindex = cellT[x] XOR crcvalue
-    next x
-    
-    if crcindex = 0 then                ' crc check passed
-        low redLed : high grnLed
-        for x = 0 to 6
-            hserout [cellT[x]]          ' Send cell temperature and crc byte on 
-        next x                          ' master bus
-    else
-        high redLed : low grnLed
-        hserout ["Error"]               ' crc failed, send "Error" on master bus
-    endif
-    
-'    for x = 0 to 1                      ' Send $08 to next slave on slave bus
-        debug command'[x]
-        'SEROUT slvout, T9600, [command[x]]
-'    next x
-    
-    goto Incomming                      ' Go back and wait for the next command
-endif
-
-Timeout:
-    low grnLed : low redLed
-    goto Incomming                      ' Go back and wait for the next command
-    
-stop
+return
 
 CRCtable:
 ' CRC-8 is a form of packet error checking used to verify a data stream against
