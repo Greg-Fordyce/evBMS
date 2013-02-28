@@ -1,0 +1,410 @@
+'---- Li-Ion Battery Management System 6802-2 based slave by Greg Fordyce ------
+'----      Based on BMS code by Peter Perkins and other contributors      ------
+'------ Picbasic Pro  Compiler version PIC16F1825 - 011212 - V02 Alpha ---------
+'-------------------------------------------------------------------------------
+
+'Note this code is for the Pic Basic Pro v3.01+ with MPASM Assembler
+
+'---------------------------- General Information ------------------------------
+
+;The BMS modules carry no warranty or guarantee of any kind! They are used at
+;your own risk, and I make no claims as to their suitability for a particular
+;function. Prospective users must evaluate the system before using it, and no
+;liability will be entertained by myself in any shape or form whatsoever.
+;The modules and software have been produced at low cost for the benefit of
+;the EV & electronic community. The software is available free via the internet.
+;Users may modify or adapt the system as they see fit. If you are not fully
+;competent to work on potentially lethal battery systems and high voltages,
+;then do not experiment with or use this system. Be aware that vehicle
+;modifications can lead to invalidated insurance and warranty issues. You the
+;end user remain fully liable for any modifications made to your vehicle.
+
+'-------------------------- Slave PIC 16F1825 Pinout ---------------------------
+
+;                                     Top
+;                                    _____
+; (+5V Supply)               Vdd -01|. 1  |14- Vss                   (- Supply)
+; (Red LED)                  RA5 -02|  6  |13- RA0	                (ICSP Data)
+; (Green LED)                RA4 -03|  F  |12- RA1	                 (ICSP Clk)
+; (MCLR)                     RA3 -04|  1  |11- RA2	          (SPI chip select)
+; (Slave Data Bus In)        RC5 -05|  8  |10- RC0                  (SPI clock)
+; (Master Data Bus Out)      RC4 -06|  2  |09- RC1                (SPI Data In)
+; (Slave Data Bus Out)       RC3 -07|  5  |08- RC2               (SPI Data Out)
+;                                    -----
+
+
+;---------------------------- LTC 6802-2 Pinout --------------------------------
+
+;                                    Top
+;                                   _____
+;(Stack +)                   V+ -01|  ^  |44- CSBI            (SPI chip select)
+;(Cell 12)                  C12 -02|     |43- SDO                (SPI Data Out)		
+;(Unused)                   S12 -03|     |42- SDI	              (SPI Data In)
+;(Cell 11)                  C11 -04|     |41- SCKI                  (SPI clock)
+;(Unused)                   S11 -05|  L  |40- A3              (Connected to V-)
+;(Cell 10)                  C10 -06|  T  |39- A2              (Connected to V-)
+;(Unused)                   S10 -07|  C  |38- A1              (Connected to V-)
+;(Cell 9)                    C9 -08|     |37- A0              (Connected to V-)
+;(Unused)                    S9 -09|  6  |36- GPOI2                    (Unused)
+;(Cell 8)                    C8 -10|  8  |35- GPIO1                    (Unused)
+;(Unused)                    S8 -11|  0  |34- WDTB                     (Unused)
+;(Cell 7)                    C7 -12|  2  |33- MMB           (Connected to Vreg)
+;(Unused)                    S7 -13|  |  |32- TOS                (Top of Stack)
+;(Cell 6)                    C6 -14|  2  |31- Vreg                 (5v 4ma max)
+;(Unused)                    S6 -15|     |30- Vref                   (3.3v ref)
+;(Cell 5)                    C5 -16|     |29- Vtemp2             (Cell Temp. 2)
+;(Unused)                    S5 -17|     |28- Vtemp1             (Cell Temp. 1)
+;(Cell 4)                    C4 -18|     |27- NC              (Connected to V-)
+;(Unused)                    S4 -19|     |26- V-                      (Stack -)
+;(Cell 3)                    C3 -20|     |25- S1 	                   (Unused)
+;(Unused)                    S3 -21|     |24- C1                       (Cell 1)
+;(Cell 2)                    C2 -22|     |23- S2                       (Unused)
+;                                   -----
+
+
+
+;------------------------ Slave Module Specification --------------------------
+;
+; Slave Pic 16F1825 CPU Speed 8mhz with internal resonator
+; LTC6802-2 Stack Voltage 10.00-50.00V DC - 4 to 12 cells
+; 16F1825 Supply Voltage 5.00V Isolated from LTC6802-2 Stack Voltage
+; 16F1825 Supply Voltgage provided by Master
+; Isolated Master supply recommended for higher voltage packs
+; Serial Master and Slave Bus data rate 9600 baud
+; SPI bus data rate 50kHz with 16F1825 as master for 6802-2
+; Tempurature sensors 100K thermistors.
+; Tempurature sensors at Stack potential (not isolated from pack)
+;
+;----------------------------- Slave Commands ----------------------------------
+
+' Command $01 (WRCFG)  = Write configuration register group		
+' Command $02 (RDCFG)  = Read configuration register group
+' Command $03          = Report Slave Software Version Number					
+
+' Command $04 (RDCV)   = Read cell voltage register group	
+' Command $07          = Turn On Slave Load for 0.5 seconds (Flash Led)
+' Command $08 (RDTMP)  = Read Temperature register group
+' Command $10 (STCVAD) = Start Cell Voltage A/D conversion
+' Command $20 (STOWAD) = Start Open-Wire A/D conversion
+' Command $30 (STMPAD) = Start Temperature A/D conversion
+	
+'*******************************************************************************
+'********************* Program Size 1655 out of 8192 Words *********************
+'*******************************************************************************
+
+  #CONFIG
+    __config _CONFIG1, _FOSC_INTOSC
+    __config _CONFIG2, _PLLEN_OFF & _LVP_OFF
+  #ENDCONFIG
+
+	OSCCON  = %01110000	   'Sets internal osc to 8 Mhz (Default) and stable
+    ANSELA  = %00000000    'Disable analog inputs
+    ANSELC  = %00000000    'Disable analog inputs              
+'	INTCON  = %00000000    'Interupts disabled
+
+'****************************** Includes ***************************************
+
+include "modedefs.bas"		'Allows the use of the serin/serout command
+                                
+'****************************** Defines ****************************************
+
+define OSC 8            ' Internal oscilator set to 8Mhz
+DEFINE DEBUG_REG PORTC	'Set Debug port C
+DEFINE DEBUG_BIT 3  	'Slave out on Debug pin PORTB.3
+DEFINE DEBUGIN_BIT 5	'Slave in on Debug pin PORTB.5 
+DEFINE DEBUG_BAUD 9600	'Set Debug baud rate 9600 approx 960 cps
+DEFINE DEBUG_MODE 0		'Set Debug mode: 0 = true, 1 = inverted 
+                        '(T=True Idle High)(N=Inverted Idle Low)
+
+'define HSER_RCSTA 90h      ' Hardware recieve register enabled
+define HSER_TXSTA 20h       ' Hardware transmit register enabled
+define HSER_BAUD 9600       ' Baud rate 9600
+
+'****************************** Constants **************************************
+                                
+'****************************** Variables **************************************
+
+x        var byte
+y        var byte
+crcIndex var byte           ' Holds index value for crc table lookups
+crcValue var byte           ' Holds crc table value found at crcIndex
+command  var byte[2]        ' Commands from master, 2nd byte is crc
+cfgReg   var byte[7]        ' 6802 configuration registers + crc byte
+RawCV    var byte[19]       ' Cell voltage register + crc byte
+cellT    var byte[6]        ' Cell temperature register + crc byte
+CellV    VAR WORD[12]       ' Cell voltage / 100
+
+'******************************** Aliases **************************************
+
+CSBI     var  PORTA.2       ' SPI bus 6802 chip select
+GrnLed   VAR  PORTA.5       ' Assign name "GRNLED"
+RedLed   VAR  PORTA.4       ' Assign name "REDLED"
+SCKI     var  PORTC.0       ' SPI bus clock
+MISO     VAR  PORTC.1       ' SPI Master in Slave out
+MOSI     var  PORTC.2       ' SPI Master out Slave in
+CV_byte  var  cellV.BYTE0   ' Enable byte access to CellV word array
+'SlvOut  var  PORTC.3       ' Slave bus out **USING DEBUG FOR SLAVE OUT**
+
+Start:
+
+high grnled
+pause 500
+low grnled
+
+Incomming:
+
+' Commands sent from master will be 2 bytes. 1st byte is command and second byte
+' is crc value from lookup table. Slave will check against it's own lookup table
+' to determine if command is valid. 
+
+'for x = 0 to 1              ' Recieve command byte and crc byte on slave bus
+debugin 2000,Timeout,[command]'[x]]
+'next x
+
+'crcIndex = command[0]       ' Set pointer to lookup table
+'gosub crctable              ' Get value from crc table and compare to recieved
+                            ' crc byte 
+'If crcvalue <> command[1] then 
+ '   high redLed : low grnLed
+ '   goto incomming    ' crc lookup failed, command invalid
+'endif
+
+low redLed
+                    '--- Start A/D Conversions
+
+if (command = $10) or (command = $20) or (command = $30) then
+' Command $10 (STCVAD)  Start cell voltage A/D conversions 
+' Command $20 (STOWAD)  Start Open-wire A/D conversions 
+' Command $30 (STTMPAD) Start Temperature A/D conversions
+
+'high redled
+
+' We are going to forward the command onto the next slaves before sending the
+' command on the SPI bus so that all A/D conversions start as close together as
+' possible. 
+    'for x = 0 to 1                      ' Send $x0 to next slave on slave bus
+    debug command'[x]
+    'next x
+
+    ''''''''''''''' Initialize 6802 '''''''''''''''''''''''''
+    high CSBI
+    shiftout MOSI, SCKI, 5,[$01]
+    shiftout MOSI, SCKI, 5,[%01100010]
+    for x = 1 to 5
+     shiftout MOSI, SCKI, 5,[%00000000]
+    next x
+    low csbi
+    pause 1
+
+
+    high CSBI                           ' Pull CSBI low (opto inverts levels)
+    shiftout mosi, scki, 5, [command]   ' Send $x0 to 6802
+    pause 15                            ' Wait for A/D to finish
+    low csbi                            ' Command finished, CSBI high
+    GOTO INCOMMING                      ' Go back and wait for the next command 
+endif    
+                    
+                    '--- WRCFG ---'
+                    
+if command = $01 then       ' (WRCFG) Write configuration register on 6802
+    GOTO INCOMMING          ' **** NOT YET IMPLEMENTED ****    
+ENDIF
+
+                    '--- RDCFG ---'
+                    
+IF COMMAND = $02 THEN       ' (RDCFG) Read configuration register on 6802
+    high CSBI               ' Pull CSBI low (opto inverts levels)
+    shiftout mosi, scki, 5, [command]   ' Send RDCFG to 6802
+    for x = 0 to 6
+    shiftin miso, scki, 6,[cfgreg[x]]   ' Recieve 6 config bytes + crc byte
+    next x
+    low csbi                            ' Command finished, CSBI high
+    
+ '   crcindex = cfgreg                   ' Start crc check
+ '   for x = 1 to 6
+ '       gosub crctable                  ' Step through crc table
+ '       crcindex = cfgreg[x] XOR crcvalue
+ '   next x
+    
+ '   if crcindex = 0 then                ' crc check passed
+ '       low redLed : high grnLed
+    for x = 0 to 6
+        hserout [cfgreg[x]]         ' Send config register and crc byte on 
+    next x                          ' master bus
+ '   else
+ '       high redLed : low grnLed
+ '       hserout ["Error"]               ' crc failed, send "Error" on master bus
+ '   endif
+    
+    'for x = 0 to 1                      ' Send $02 to next slave on slave bus
+    debug command'[x]
+    'next x
+    
+    goto Incomming                      ' Go back and wait for the next command
+endif
+
+                    '--- Software Version ---'
+                    
+IF COMMAND = $03 THEN                   ' Report Software Version of slave
+    hserout ["Version 02"]              ' on master bus
+    pause 5
+    debug command'[x]
+    goto Incomming                      ' Go back and wait for the next command
+endif               
+
+                    '--- RDCV ---'
+
+IF COMMAND = $04 THEN       ' (RDCV) Read cell voltage register on 6802
+    high CSBI               ' Pull CSBI low (opto inverts levels)
+    shiftout mosi, scki, 5,[command] ' Send RDCV to 6802
+    for x = 0 to 18
+        shiftin miso, scki, 6,[RawCV[x]] ' Recieve 18 RawCV bytes + crc byte
+    next x
+    low csbi                            ' Command finished, CSBI high
+    
+'    crcindex = RawCV                    ' Start crc check
+'    for x = 1 to 18
+'        gosub crctable                  ' Step through crc table
+'        crcindex = RawCV [x] XOR crcvalue
+'    next x
+    
+'    if crcindex = 0 then                ' crc check passed
+'        low redLed : high grnLed
+ 
+''''''''''''''''''''''' Convert RawCV to cell voltages '''''''''''''''''''''''''
+'                                                                              '
+'       6802 outputs every 2 cell voltages as 3 bytes (12 bit adc).            '         
+'       This section converts this to a word variable for each cell.           '
+'                                                                              '
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+    x = 0                                                                          
+    for y = 0 to 20 step 4                                                         
+        CV_byte[y] = RawCV[x]       ' CV_byte is a alias for CellV word variable
+        x = x + 1                   ' Increment pointer for RawCV
+        CV_byte[y+1] = RawCV[x] &  %00001111    ' Mask 4 lower bits of RawCV
+        CV_byte[y+2] = RawCV[x]
+        x = x + 1                   ' Increment pointer for RawCV
+        CV_byte[y+3] = RawCV[x]
+        x = x + 1
+    Next y
+          
+    For y = 1 to 11 step 2              
+        Cellv[y] = Cellv[y] >> 4     ' Shift value 4 bits right
+    Next y
+    
+    '           -------- Convert value to voltage/100 ------------    
+    for y = 0 to 11
+        cellv[y] = cellv[y] * 15
+        if CellV[y] <> 0 then
+            if (cellv[y] // 100) < 50 then 'Determine if value needs rounding up
+                cellV[y] = cellv[y] / 100  'Cell voltage / 100 (10mv resolution)
+            else 
+                cellv[y] = (cellv[y] / 100) + 1
+            endif
+        endif
+    next y
+        
+        
+    for y = 0 to 11
+        If CellV[y] <> 0 then hserout [dec cellv[y] , ","]    
+        ' Output cell voltages as 3 character ascii text seperated by comma    
+    next y                               
+    
+    debug command'[x]                   Output on slave bus
+        
+    goto Incomming                      ' Go back and wait for the next command
+endif
+
+                    
+IF COMMAND = $07 THEN                   
+    Low grnled
+    high redled                         ' Turn on red led
+    pause 250
+    debug command'[x]                   ' Send $07 to next slave on slave bus
+    pause 250
+    low redled                          ' turn off red led
+    High grnled
+    goto Incomming                      ' Go back and wait for the next command
+endif
+
+                    '--- RDTMP ---'
+
+IF COMMAND = $08 THEN       ' (RDTMP) Read cell temperature register on 6802
+    high CSBI               ' Pull CSBI low (opto inverts levels)
+    shiftout mosi, scki, 5,[command]    ' Send RDTMP to 6802
+    for x = 0 to 18
+    shiftin miso, scki, 6,[cellT[x]]    ' Recieve 18 RawCV bytes + crc byte
+    next x
+    low csbi                            ' Command finished, CSBI high
+    
+    crcindex = cellT                    ' Start crc check
+    for x = 1 to 18
+        gosub crctable                  ' Step through crc table
+        crcindex = cellT[x] XOR crcvalue
+    next x
+    
+    if crcindex = 0 then                ' crc check passed
+        low redLed : high grnLed
+        for x = 0 to 6
+            hserout [cellT[x]]          ' Send cell temperature and crc byte on 
+        next x                          ' master bus
+    else
+        high redLed : low grnLed
+        hserout ["Error"]               ' crc failed, send "Error" on master bus
+    endif
+    
+'    for x = 0 to 1                      ' Send $08 to next slave on slave bus
+        debug command'[x]
+        'SEROUT slvout, T9600, [command[x]]
+'    next x
+    
+    goto Incomming                      ' Go back and wait for the next command
+endif
+
+Timeout:
+    low grnLed : low redLed
+    goto Incomming                      ' Go back and wait for the next command
+    
+stop
+
+CRCtable:
+' CRC-8 is a form of packet error checking used to verify a data stream against
+' errors. The 6802 uses the CRC polynomial x^8 + x^2 + x^1 + 1. There are other 
+' CRC-8 polynomials in use as well that work the same but have different lookup
+' tables, they are not interchangeable. How does it work? By magic! If you don't
+' belive in magic then search the web for Maxim Application Note 3749 for a good 
+' explaination. :)  Thanks to Maxim for providing the lookup table.
+
+
+'crc lookup table should be 256 bytes but the LOOKUP command only allows tables 
+'up to 255 bytes, so the first byte ($00) has been omitted. This means we need 
+'to check that crcIndex is greater than 0 and if it is subtract 1 to point to 
+'the correct table value. 
+
+If crcindex = 0 then            
+    crcvalue = 0                ' First byte of table should be $00
+    return
+else
+    crcindex = crcindex - 1     ' Correct index due to lookup table offset
+endif
+     
+LOOKUP crcindex,[$07, $0E, $09, $1C, $1B, $12, $15, $38, $3F, $36, $31,_ 
+$24, $23, $2A, $2D, $70, $77, $7E, $79, $6C, $6B, $62, $65, $48, $4F, $46,_
+$41, $54, $53, $5A, $5D, $E0, $E7, $EE, $E9, $FC, $FB, $F2, $F5, $D8, $DF,_
+$D6, $D1, $C4, $C3, $CA, $CD, $90, $97, $9E, $99, $8C, $8B, $82, $85, $A8,_
+$AF, $A6, $A1, $B4, $B3, $BA, $BD, $C7, $C0, $C9, $CE, $DB, $DC, $D5, $D2,_
+$FF, $F8, $F1, $F6, $E3, $E4, $ED, $EA, $B7, $B0, $B9, $BE, $AB, $AC, $A5,_
+$A2, $8F, $88, $81, $86, $93, $94, $9D, $9A, $27, $20, $29, $2E, $3B, $3C,_
+$35, $32, $1F, $18, $11, $16, $03, $04, $0D, $0A, $57, $50, $59, $5E, $4B,_
+$4C, $45, $42, $6F, $68, $61, $66, $73, $74, $7D, $7A, $89, $8E, $87, $80,_
+$95, $92, $9B, $9C, $B1, $B6, $BF, $B8, $AD, $AA, $A3, $A4, $F9, $FE, $F7,_
+$F0, $E5, $E2, $EB, $EC, $C1, $C6, $CF, $C8, $DD, $DA, $D3, $D4, $69, $6E,_
+$67, $60, $75, $72, $7B, $7C, $51, $56, $5F, $58, $4D, $4A, $43, $44, $19,_
+$1E, $17, $10, $05, $02, $0B, $0C, $21, $26, $2F, $28, $3D, $3A, $33, $34,_
+$4E, $49, $40, $47, $52, $55, $5C, $5B, $76, $71, $78, $7F, $6A, $6D, $64,_
+$63, $3E, $39, $30, $37, $22, $25, $2C, $2B, $06, $01, $08, $0F, $1A, $1D,_
+$14, $13, $AE, $A9, $A0, $A7, $B2, $B5, $BC, $BB, $96, $91, $98, $9F, $8A,_
+$8D, $84, $83, $DE, $D9, $D0, $D7, $C2, $C5, $CC, $CB, $E6, $E1, $E8, $EF,_
+$FA, $FD, $F4, $F3], CRCvalue   ' crcValue is result from lookup table
+
+Return
