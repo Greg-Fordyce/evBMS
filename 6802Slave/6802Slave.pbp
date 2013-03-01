@@ -1,6 +1,6 @@
 '---- Li-Ion Battery Management System 6802-2 based slave by Greg Fordyce ------
 '----      Based on BMS code by Peter Perkins and other contributors      ------
-'------ Picbasic Pro  Compiler version PIC16F1825 - 011212 - V02 Alpha ---------
+'------ Picbasic Pro  Compiler version PIC16F1825 - 010313 - V02 Alpha ---------
 '-------------------------------------------------------------------------------
 
 'Note this code is for the Pic Basic Pro v3.01+ with MPASM Assembler
@@ -154,7 +154,7 @@ low grnled
 Incomming:
 
 debugin 2000,Timeout,[command]   ' Recieve command from master/previous slave
-
+low grnled
 low redLed
                     '--- Start A/D Conversions
 
@@ -163,8 +163,8 @@ if (command = $10) or (command = $20) or (command = $30) then
 ' Command $20 (STOWAD)  Start Open-wire A/D conversions 
 ' Command $30 (STTMPAD) Start Temperature A/D conversions
 
-' We are going to forward the command onto the next slaves before sending the
-' command on the SPI bus so that all A/D conversions start close together. 
+' We are going to forward [command] onto the next slaves before sending 
+' [command] on the SPI bus so that all A/D conversions start close together. 
     debug command
     gosub Initialize                    ' Initalize 6802 with [command]
     GOTO INCOMMING                      ' Go back and wait for the next command 
@@ -189,24 +189,24 @@ IF COMMAND = $02 THEN       ' (RDCFG) Read configuration register on 6802
     for x = 0 to 6
         hserout [cfgreg[x]]         ' Send config register and crc byte on 
     next x                          ' master bus
-    debug command    
+    debug command                   ' Send command to next slave
     goto Incomming                  ' Go back and wait for the next command
 endif
 
                     '--- Software Version ---'
                     
 IF COMMAND = $03 THEN                   ' Report Software Version of slave
-    hserout ["Version 02"]              ' on master bus
+    hserout ["Version 03"]              ' on master bus
     pause 5
-    debug command
+    debug command                       ' Send [command] to next slave
     goto Incomming                      ' Go back and wait for the next command
 endif               
 
                     '--- RDCV ---'
 
-IF COMMAND = $04 THEN       ' (RDCV) Read cell voltage register on 6802
-    gosub rdcv    
-    goto Incomming                      ' Go back and wait for the next command
+IF COMMAND = $04 THEN       
+    gosub rdcv                      ' (RDCV) Read cell voltage register on 6802
+    goto Incomming                  ' Go back and wait for the next command
 endif
 
                     
@@ -214,7 +214,7 @@ IF COMMAND = $07 THEN
     Low grnled
     high redled                         ' Turn on red led
     pause 250
-    debug command'[x]                   ' Send $07 to next slave on slave bus
+    debug command                       ' Send $07 to next slave on slave bus
     pause 250
     low redled                          ' turn off red led
     High grnled
@@ -252,16 +252,19 @@ IF COMMAND = $08 THEN       ' (RDTMP) Read cell temperature register on 6802
     goto Incomming                      ' Go back and wait for the next command
 endif
 
+                      '--- Report cell voltages ---'
+                      
 if command = 200 then
     command = $10 ' Command $10 (STCVAD)  Start cell voltage A/D conversions 
-    
+    high grnled
 ' We are going to forward the command onto the next slaves before sending the
 ' command on the SPI bus so that all A/D conversions start close together. 
-    debug command
+    debug command                       ' Send [command] to next slave
     gosub Initialize                    ' Initalize 6802 with [command]
-    
+    pause 5
+    high redled
     command = $04                       ' Now we need to read cell voltages
-    gosub rdcv
+    gosub RDCV
     
     GOTO INCOMMING                      ' Go back and wait for the next command 
 endif    
@@ -292,7 +295,9 @@ Initialize:
 Return
 
 RDCV:
-        high CSBI               ' Pull CSBI low (opto inverts levels)
+     '---------------Send cell voltage register on master bus------------------
+        
+    high CSBI               ' Pull CSBI low (opto inverts levels)
     shiftout mosi, scki, 5,[command] ' Send RDCV to 6802
     for x = 0 to 18
         shiftin miso, scki, 6,[RawCV[x]] ' Recieve 18 RawCV bytes + crc byte
