@@ -1,6 +1,6 @@
 '---- Li-Ion Battery Management System 6802-2 based slave by Greg Fordyce ------
 '----      Based on BMS code by Peter Perkins and other contributors      ------
-'------ Picbasic Pro  Compiler version PIC16F1825 - 010313 - V02 Alpha ---------
+'------ Picbasic Pro  Compiler version PIC16F1825 - 010313 - V03 Alpha ---------
 '-------------------------------------------------------------------------------
 
 'Note this code is for the Pic Basic Pro v3.01+ with MPASM Assembler
@@ -90,7 +90,7 @@
 ' Command 200          = Start A/D and read cell voltages in one command.
 	
 '*******************************************************************************
-'********************* Program Size 1676 out of 8192 Words *********************
+'********************* Program Size 1683 out of 8192 Words *********************
 '*******************************************************************************
 
   #CONFIG
@@ -256,13 +256,11 @@ endif
                       
 if command = 200 then
     command = $10 ' Command $10 (STCVAD)  Start cell voltage A/D conversions 
-    high grnled
 ' We are going to forward the command onto the next slaves before sending the
 ' command on the SPI bus so that all A/D conversions start close together. 
     debug command                       ' Send [command] to next slave
     gosub Initialize                    ' Initalize 6802 with [command]
-    pause 5
-    high redled
+    pause 5       ' Small delay required between routines to allow CSBI to reset
     command = $04                       ' Now we need to read cell voltages
     gosub RDCV
     
