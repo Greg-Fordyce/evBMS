@@ -98,7 +98,7 @@
 ' Command 200          = Start A/D and read cell voltages in one command.
 	
 '*******************************************************************************
-'********************* Program Size 1919 out of 8192 Words *********************
+'********************* Program Size 1923 out of 8192 Words *********************
 '*******************************************************************************
 
   #CONFIG
@@ -107,8 +107,10 @@
   #ENDCONFIG
 
 	OSCCON  = %01110000	   'Sets internal osc to 8 Mhz (Default) and stable
-    ANSELA  = %00000000    'Disable analog inputs
+'    ANSELA  = %00000000    'Disable analog inputs
+    ANSELA  = %00000010    'enable AN1 analog inputs
     ANSELC  = %00000000    'Disable analog inputs              
+    ADCON1  = %10010000    'Right justify result, Fosc/8, Vref- Vss, Vref+ Vdd
 '	INTCON  = %00000000    'Interupts disabled
 
 '****************************** Includes ***************************************
@@ -384,7 +386,7 @@ CheckCurrent:					'Accumulate (Current in Amps) charge/discharge data
 	
 	BatCurrent = 0				'Reset Current oversampling accumulator to 0 (Zero)
 '*********** NEED TO CHECK DATA SHEET FOR CORRECT ADCON PARAMETERS *************
-    	ADCON0 = %01000001			'SETUP ADC CONVERTER MODULE FOSC/8 & ENABLE ADC MODULE on AD0
+    ADCON0 = %00000101	     'ENABLE ADC MODULE on AN1
 
 	for x = 0 to 3			'4 x Current Oversampling
 	ADCON0.1 = 1  				'Start ADC conversion                                 
@@ -396,6 +398,7 @@ CheckCurrent:					'Accumulate (Current in Amps) charge/discharge data
 
 	BatCurrent = BatCurrent + VarB		'Add Current to accumulated Current 
 	Next x				'Repeat loop until 4 samples obtained
+'    ADCON0 = %00000100	     'DISABLE ADC MODULE on AN1
 	
 	return					'Return to main program loop
 	
