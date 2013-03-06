@@ -1,6 +1,6 @@
 '---- Li-Ion Battery Management System 6802-2 based slave by Greg Fordyce ------
 '----      Based on BMS code by Peter Perkins and other contributors      ------
-'------ Picbasic Pro  Compiler version PIC16F1825 - 010313 - V03 Alpha ---------
+'------ Picbasic Pro  Compiler version PIC16F1825 - 050313 - V04 Alpha ---------
 '-------------------------------------------------------------------------------
 
 'Note this code is for the Pic Basic Pro v3.01+ with MPASM Assembler
@@ -64,11 +64,11 @@
 
 ;------------------ Current sensor connections to ICSP header -----------------
 ;
-;   Pin 1 - (RA3) No connection                
-;   Pin 2 - (Vdd) +5 volts      
-;   Pin 3 - (Vss) Earth / 0 volt
-;   Pin 4 - (RA0) Sensor enable in software, connect to pin 3/Vss *** NOT YET IMPLEMENTED! ***
-;   Pin 5 - (RA1) Analouge input from sensor
+;   Pin 1 - (RA3) Sensor enable in software, connect to pin 3/Vss *** NOT YET IMPLEMENTED! ***                
+;   Pin 2 - (Vdd) +5 volt      
+;   Pin 3 - (Vss)  0 volt
+;   Pin 4 - (AN0) Analouge input from sensor
+;   Pin 5 - (AN1) No connection
 
 
 ;------------------------ Slave Module Specification --------------------------
@@ -102,13 +102,13 @@
 '*******************************************************************************
 
   #CONFIG
-    __config _CONFIG1, _FOSC_INTOSC
+    __config _CONFIG1, _MCLRE_OFF & _FOSC_INTOSC
     __config _CONFIG2, _PLLEN_OFF & _LVP_OFF
   #ENDCONFIG
 
 	OSCCON  = %01110000	   'Sets internal osc to 8 Mhz (Default) and stable
 '    ANSELA  = %00000000    'Disable analog inputs
-    ANSELA  = %00000010    'enable AN1 analog inputs
+    ANSELA  = %00000001    'enable AN0 analog inputs
     ANSELC  = %00000000    'Disable analog inputs              
     ADCON1  = %10010000    'Right justify result, Fosc/8, Vref- Vss, Vref+ Vdd
 '	INTCON  = %00000000    'Interupts disabled
@@ -211,7 +211,7 @@ endif
                     '--- Software Version ---'
                     
 IF COMMAND = $03 THEN                   ' Report Software Version of slave
-    hserout ["Version 03"]              ' on master bus
+    hserout ["Version 04"]              ' on master bus
     pause 5
     debug command                       ' Send [command] to next slave
     goto Incomming                      ' Go back and wait for the next command
@@ -291,7 +291,7 @@ endif
 
 if command = 201 then
     
-    gosub calculatesoc
+    gosub OutputCurrent
     GOTO INCOMMING                      ' Go back and wait for the next command 
 endif    
 
@@ -386,7 +386,7 @@ CheckCurrent:					'Accumulate (Current in Amps) charge/discharge data
 	
 	BatCurrent = 0				'Reset Current oversampling accumulator to 0 (Zero)
 '*********** NEED TO CHECK DATA SHEET FOR CORRECT ADCON PARAMETERS *************
-    ADCON0 = %00000101	     'ENABLE ADC MODULE on AN1
+    ADCON0 = %00000001	     'ENABLE ADC MODULE on AN0
 
 	for x = 0 to 3			'4 x Current Oversampling
 	ADCON0.1 = 1  				'Start ADC conversion                                 
@@ -402,7 +402,7 @@ CheckCurrent:					'Accumulate (Current in Amps) charge/discharge data
 	
 	return					'Return to main program loop
 	
-CalculateSoc:					'Calculate Soc routine
+OutputCurrent:					'Send current on master bus
 
 
 	BatCurrent = BatCurrent >> 1            'Divide by 2, BatCurrent is now 0-2048
