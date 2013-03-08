@@ -1,6 +1,6 @@
 '---- Li-Ion Battery Management System 6802-2 based slave by Greg Fordyce ------
 '----      Based on BMS code by Peter Perkins and other contributors      ------
-'------ Picbasic Pro  Compiler version PIC16F1825 - 080313 - V04 Alpha ---------
+'------ Picbasic Pro  Compiler version PIC16F1825 - 080313 - V05 Alpha ---------
 '-------------------------------------------------------------------------------
 
 'Note this code is for the Pic Basic Pro v3.01+ with MPASM Assembler
@@ -98,7 +98,7 @@
 ' Command 200          = Start A/D and read cell voltages in one command.
 	
 '*******************************************************************************
-'********************* Program Size 1882 out of 8192 Words *********************
+'********************* Program Size 1944 out of 8192 Words *********************
 '*******************************************************************************
 
   #CONFIG
@@ -143,11 +143,11 @@ crcValue var byte           ' Holds crc table value found at crcIndex
 command  var byte           ' Commands from master
 cfgReg   var byte[7]        ' 6802 configuration registers + crc byte
 RawCV    var byte[19]       ' Cell voltage register + crc byte
-cellT    var byte[6]        ' Cell temperature register + crc byte
+TMPR     var byte[6]        ' Temperature register + crc byte
+CellT    var word[3]        ' Cell temperature 
 CellV    VAR WORD[12]       ' Cell voltage / 100
 BatCurrent	var Word 	'Global = Current Sensor ADC value 0-1023 10bit (0-5v) 
 VarB       	var Word 	'Local  = General 0-65535 16bit Word Variable
-AmpSign		var Byte		'Global = [AmpSign + or -]
 
 '******************************** Aliases **************************************
 
@@ -212,7 +212,7 @@ endif
                     '--- Software Version ---'
                     
 IF COMMAND = $03 THEN                   ' Report Software Version of slave
-    hserout ["Version 04"]              ' on master bus
+    hserout ["Version 05"]              ' on master bus
     pause 5
     debug command                       ' Send [command] to next slave
     goto Incomming                      ' Go back and wait for the next command
@@ -242,28 +242,22 @@ endif
                     '--- RDTMP ---'
 
 IF COMMAND = $08 THEN       ' (RDTMP) Read cell temperature register on 6802
-    high CSBI               ' Pull CSBI low (opto inverts levels)
-    shiftout mosi, scki, 5,[command]    ' Send RDTMP to 6802
-    for x = 0 to 18
-    shiftin miso, scki, 6,[cellT[x]]    ' Recieve 18 RawCV bytes + crc byte
-    next x
-    low csbi                            ' Command finished, CSBI high
     
-    crcindex = cellT                    ' Start crc check
-    for x = 1 to 18
-        gosub crctable                  ' Step through crc table
-        crcindex = cellT[x] XOR crcvalue
-    next x
+'    crcindex = cellT                    ' Start crc check
+'    for x = 1 to 18
+'        gosub crctable                  ' Step through crc table
+'        crcindex = cellT[x] XOR crcvalue
+'    next x
     
-    if crcindex = 0 then                ' crc check passed
-        low redLed : high grnLed
-        for x = 0 to 6
-            hserout [cellT[x]]          ' Send cell temperature and crc byte on 
-        next x                          ' master bus
-    else
-        high redLed : low grnLed
-        hserout ["Error"]               ' crc failed, send "Error" on master bus
-    endif
+'    if crcindex = 0 then                ' crc check passed
+'        low redLed : high grnLed
+'        for x = 0 to 6
+'            hserout [cellT[x]]          ' Send cell temperature and crc byte on 
+'        next x                          ' master bus
+'    else
+'       high redLed : low grnLed
+'       hserout ["Error"]               ' crc failed, send "Error" on master bus
+'   endif
     
         debug command
     
@@ -382,6 +376,36 @@ RDCV:
     debug command'[x]                   Output on slave bus
 
 return
+
+RDTMP:
+
+    high CSBI               ' Pull CSBI low (opto inverts levels)
+    shiftout mosi, scki, 5,[command]    ' Send RDTMP to 6802
+    for x = 0 to 5
+        shiftin miso, scki, 6,[TMPR[x]]   ' Recieve 5 RawTMP bytes + crc byte
+    next x
+    low csbi                            ' Command finished, CSBI high
+
+    CellT[0] = TMPR[1] &  %00001111   ' Mask 4 lower bits of TMPR
+    cellt[0] = cellt[0] << 8          ' Shift to high byte of word variable
+    Cellt[0] = Cellt[0] + TMPR[0]     ' CellT[0] now holds ETMP1 value
+    
+    CellT[1] = TMPR[2]
+    cellt[1] = cellt[1] << 8
+    CellT[1] = cellt[1] + tmpr[1]
+    Cellt[1] = cellt[1] >> 4          ' CellT[1] now holds ETMP2 value
+    
+    CellT[2] = TMPR[4] &  %00001111   ' Mask 4 lower bits of TMPR
+    cellt[2] = cellt[2] << 8          ' Shift to high byte of word variable
+    Cellt[2] = Cellt[2] + TMPR[3]     ' CellT[2] now holds ITMP raw value.
+    'Temperature measurement voltage = ITMP * 1.5mV = 8mV * T(°K)
+
+    for y = 0 to 2
+        hserout [dec cellT[y] , ","]    
+        ' Output raw cell temp as ascii text seperated by comma    
+    next y                               
+
+return    
 
 CheckCurrent:			' Read current sensor
 	
