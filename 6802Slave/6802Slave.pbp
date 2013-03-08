@@ -1,6 +1,6 @@
 '---- Li-Ion Battery Management System 6802-2 based slave by Greg Fordyce ------
 '----      Based on BMS code by Peter Perkins and other contributors      ------
-'------ Picbasic Pro  Compiler version PIC16F1825 - 050313 - V04 Alpha ---------
+'------ Picbasic Pro  Compiler version PIC16F1825 - 080313 - V04 Alpha ---------
 '-------------------------------------------------------------------------------
 
 'Note this code is for the Pic Basic Pro v3.01+ with MPASM Assembler
@@ -98,7 +98,7 @@
 ' Command 200          = Start A/D and read cell voltages in one command.
 	
 '*******************************************************************************
-'********************* Program Size 1923 out of 8192 Words *********************
+'********************* Program Size 1882 out of 8192 Words *********************
 '*******************************************************************************
 
   #CONFIG
@@ -107,8 +107,9 @@
   #ENDCONFIG
 
 	OSCCON  = %01110000	   'Sets internal osc to 8 Mhz (Default) and stable
-'    ANSELA  = %00000000    'Disable analog inputs
+'   ANSELA  = %00000000    'Disable analog inputs
     ANSELA  = %00000001    'enable AN0 analog inputs
+'   ANSELA  = %00000011    'enable AN0 & AN1 analog inputs
     ANSELC  = %00000000    'Disable analog inputs              
     ADCON1  = %10010000    'Right justify result, Fosc/8, Vref- Vss, Vref+ Vdd
 '	INTCON  = %00000000    'Interupts disabled
@@ -289,7 +290,7 @@ endif
 
              '--- Return current sensor value on master bus ---'
 
-if command = 201 then
+if command = 202 then
     
     gosub OutputCurrent
     GOTO INCOMMING                      ' Go back and wait for the next command 
@@ -382,58 +383,31 @@ RDCV:
 
 return
 
-CheckCurrent:					'Accumulate (Current in Amps) charge/discharge data
+CheckCurrent:			' Read current sensor
 	
-	BatCurrent = 0				'Reset Current oversampling accumulator to 0 (Zero)
-'*********** NEED TO CHECK DATA SHEET FOR CORRECT ADCON PARAMETERS *************
-    ADCON0 = %00000001	     'ENABLE ADC MODULE on AN0
+	BatCurrent = 0		' Reset Current oversampling accumulator to 0 (Zero)
+    ADCON0 = %00000001	' ENABLE ADC MODULE on AN0
 
-	for x = 0 to 3			'4 x Current Oversampling
-	ADCON0.1 = 1  				'Start ADC conversion                                 
-    	while ADCON0.1 = 1	  		'Wait for ADC DONE
+	for x = 0 to 3		'4 x Current Oversampling
+	ADCON0.1 = 1  		'Start ADC conversion                                 
+	while ADCON0.1 = 1	'Wait for ADC DONE
 	wend
 
-    	VarB.highbyte = ADRESH  		'Move HIGH byte of result to Variable (0-1023 10bit)(-100A to +100A 0-5V)
-    	VarB.lowbyte = ADRESL  			'Move LOW byte of result to Variable  (0-1023 10bit)(-100A to +100A 0-5V)
+    VarB.highbyte = ADRESH  'Move HIGH byte of result to Variable (0-1023 10bit)
+    VarB.lowbyte = ADRESL  	'Move LOW byte of result to Variable  (0-1023 10bit)
 
 	BatCurrent = BatCurrent + VarB		'Add Current to accumulated Current 
-	Next x				'Repeat loop until 4 samples obtained
-'    ADCON0 = %00000100	     'DISABLE ADC MODULE on AN1
+	Next x				 'Repeat loop until 4 samples obtained
+    ADCON0 = %00000000	     'DISABLE ADC MODULE on AN1
+	BatCurrent = BatCurrent >> 2   'Divide by 4, BatCurrent is now 0-1024
 	
-	return					'Return to main program loop
+return					 'Return to main program loop
 	
 OutputCurrent:					'Send current on master bus
 
-
-	BatCurrent = BatCurrent >> 1            'Divide by 2, BatCurrent is now 0-2048
-	BatCurrent = BatCurrent ** 64000       	'Multiply by ~0.97656, BatCurrent is now 0-2000
-
-	If BatCurrent < 1000 then		'Means system is Discharging 
-	BatCurrent = 1000 - BatCurrent
-	AmpSign = 45				'Set ascii Character 45 (-) to be displayed if Discharging 
-		
-	else                        		'Means system is Charging
-
-	BatCurrent = BatCurrent - 1000
-	AmpSign = 43				'Set ascii Character 43 (+) to be displayed if charging
-	endif
-
-'   BatCurrent = BatCurrent / 10		'Divide by 10 to get -100 - 0 - +100 A
-	BatCurrent = BatCurrent / 20		'Divide by 20 to get -50 - 0 - +50 A
-	hserout [dec batcurrent] 
- '       If PcBit = 0 then
- '       serout PCLogger, N9600, [#AmpSign,",",#BatCurrent,","] 	'Send Amp Sign & Battery Current Data to PC Logger
- '       endif
-		
-'Display Battery Amps & Motor Power Kw
-
-'	VarA = (PackV / 100) * BatCurrent
-'	VarB = (VarA // 1000) / 100
-'	VarA = VarA / 1000
-	
-'	DEBUG 27,83,0,4,"Amp ",AmpSign,#BatCurrent," K ",#VarA,".",#VarB," "	'Video Display 
-	
-	return					'Return to main program loop
+    hserout [dec batcurrent , ","] ' Output raw 10 bit adc value followed by ","
+   
+return					'Return to main program loop
 
 
 CRCtable:
