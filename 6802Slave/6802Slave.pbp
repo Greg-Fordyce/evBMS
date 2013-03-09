@@ -1,6 +1,6 @@
 '---- Li-Ion Battery Management System 6802-2 based slave by Greg Fordyce ------
 '----      Based on BMS code by Peter Perkins and other contributors      ------
-'------ Picbasic Pro  Compiler version PIC16F1825 - 080313 - V05 Alpha ---------
+'------ Picbasic Pro  Compiler version PIC16F1825 - 090313 - V05 Alpha ---------
 '-------------------------------------------------------------------------------
 
 'Note this code is for the Pic Basic Pro v3.01+ with MPASM Assembler
@@ -64,7 +64,7 @@
 
 ;------------------ Current sensor connections to ICSP header -----------------
 ;
-;   Pin 1 - (RA3) Sensor enable in software, connect to pin 3/Vss *** NOT YET IMPLEMENTED! ***                
+;   Pin 1 - (RA3) Sensor enable in software, connect to pin 3/Vss                 
 ;   Pin 2 - (Vdd) +5 volt      
 ;   Pin 3 - (Vss)  0 volt
 ;   Pin 4 - (AN0) Analouge input from sensor
@@ -95,10 +95,12 @@
 ' Command $10 (STCVAD) = Start Cell Voltage A/D conversion
 ' Command $20 (STOWAD) = Start Open-Wire A/D conversion
 ' Command $30 (STMPAD) = Start Temperature A/D conversion
-' Command 200          = Start A/D and read cell voltages in one command.
-	
+' Command 200          = Start Cell A/D and read cell voltages in one command
+' Command 201          = Start Temp	A/D and read temperatures in one command
+' Command 202          = Start current sensor A/D and read amps in one command
+
 '*******************************************************************************
-'********************* Program Size 1944 out of 8192 Words *********************
+'********************* Program Size 2066 out of 8192 Words *********************
 '*******************************************************************************
 
   #CONFIG
@@ -141,11 +143,12 @@ y        var byte
 crcIndex var byte           ' Holds index value for crc table lookups
 crcValue var byte           ' Holds crc table value found at crcIndex
 command  var byte           ' Commands from master
+OptInput var bit            ' Status of optional current sensor on ICSP header
 cfgReg   var byte[7]        ' 6802 configuration registers + crc byte
 RawCV    var byte[19]       ' Cell voltage register + crc byte
 TMPR     var byte[6]        ' Temperature register + crc byte
 CellT    var word[3]        ' Cell temperature 
-CellV    VAR WORD[12]       ' Cell voltage / 100
+CellV    VAR WORD[12]       ' Cell voltage / 100  ( 334 = 3.34 volts)
 BatCurrent	var Word 	'Global = Current Sensor ADC value 0-1023 10bit (0-5v) 
 VarB       	var Word 	'Local  = General 0-65535 16bit Word Variable
 
@@ -167,6 +170,8 @@ high grnled
 pause 500
 low grnled
 
+Optinput = PORTA.3          ' 0 = Current sensor connected, 1 = not connected
+
 Incomming:
 
 debugin 2000,Timeout,[command]   ' Recieve command from master/previous slave
@@ -181,7 +186,7 @@ if (command = $10) or (command = $20) or (command = $30) then
 
 ' We are going to forward [command] onto the next slaves before sending 
 ' [command] on the SPI bus so that all A/D conversions start close together. 
-    debug command
+    debug command                       ' Send command to next slave
     gosub Initialize                    ' Initalize 6802 with [command]
     GOTO INCOMMING                      ' Go back and wait for the next command 
 endif    
@@ -242,25 +247,7 @@ endif
                     '--- RDTMP ---'
 
 IF COMMAND = $08 THEN       ' (RDTMP) Read cell temperature register on 6802
-    
-'    crcindex = cellT                    ' Start crc check
-'    for x = 1 to 18
-'        gosub crctable                  ' Step through crc table
-'        crcindex = cellT[x] XOR crcvalue
-'    next x
-    
-'    if crcindex = 0 then                ' crc check passed
-'        low redLed : high grnLed
-'        for x = 0 to 6
-'            hserout [cellT[x]]          ' Send cell temperature and crc byte on 
-'        next x                          ' master bus
-'    else
-'       high redLed : low grnLed
-'       hserout ["Error"]               ' crc failed, send "Error" on master bus
-'   endif
-    
-        debug command
-    
+    gosub rdtmp
     goto Incomming                      ' Go back and wait for the next command
 endif
 
@@ -272,21 +259,32 @@ if command = 200 then
 ' command on the SPI bus so that all A/D conversions start close together. 
     debug command                       ' Send [command] to next slave
     gosub Initialize                    ' Initalize 6802 with [command]
-
- '   pause 5       ' Small delay required between routines to allow CSBI to reset
     GOSUB CheckCurrent   ' Read current sensor attached to slave
-    
     command = $04                       ' Now we need to read cell voltages
     gosub RDCV
     
     GOTO INCOMMING                      ' Go back and wait for the next command 
 endif    
 
+                   '--- Report temperature readings ---'
+if command = 201 then
+    command = $30 ' Command $30 (STTMPAD) Start Temperature A/D conversions 
+' We are going to forward the command onto the next slaves before sending the
+' command on the SPI bus so that all A/D conversions start close together. 
+    debug command                       ' Send [command] to next slave
+    gosub Initialize                    ' Initalize 6802 with [command]
+    command = $08                       ' Now we need to read cell voltages
+    gosub RDTMP                         ' Output temp readings on master bus
+    GOTO INCOMMING                      ' Go back and wait for the next command 
+endif    
+
+
+
              '--- Return current sensor value on master bus ---'
 
-if command = 202 then
-    
+if command = 202 then    
     gosub OutputCurrent
+    debug command                       ' Send [command] to next slave
     GOTO INCOMMING                      ' Go back and wait for the next command 
 endif    
 
@@ -306,13 +304,20 @@ Initialize:
      shiftout MOSI, SCKI, 5,[%00000000]
     next x
     low csbi
-    pause 1
+    pause 1                             ' Allow CSBI to go low
 
 
     high CSBI                           ' Pull CSBI low (opto inverts levels)
     shiftout mosi, scki, 5, [command]   ' Send $x0 to 6802
     pause 15                            ' Wait for A/D to finish
     low csbi                            ' Command finished, CSBI high
+
+    if command = 10 and optinput = 0 then
+        GOSUB CheckCurrent              ' Read current sensor attached to slave
+    else
+        pause 1                         ' Allow CSBI to go low
+    endif
+
 Return
 
 RDCV:
@@ -399,38 +404,42 @@ RDTMP:
     cellt[2] = cellt[2] << 8          ' Shift to high byte of word variable
     Cellt[2] = Cellt[2] + TMPR[3]     ' CellT[2] now holds ITMP raw value.
     'Temperature measurement voltage = ITMP * 1.5mV = 8mV * T(°K)
-
+    cellt[2] = cellt[2] + (cellt[2] / 2)  ' CellT[2] * 1.5
+    CellT[2] = CellT[2] / 8          ' CellT[2] / 8
+    CellT[2] = CellT[2] - 273         ' Kelvin to Celcius
+    
     for y = 0 to 2
         hserout [dec cellT[y] , ","]    
-        ' Output raw cell temp as ascii text seperated by comma    
+        ' Output raw cell temp as ascii text seperated by comma, 6802 temp in C    
     next y                               
-
+    debug command                       ' Send [command] to next slave
 return    
 
 CheckCurrent:			' Read current sensor
 	
-	BatCurrent = 0		' Reset Current oversampling accumulator to 0 (Zero)
-    ADCON0 = %00000001	' ENABLE ADC MODULE on AN0
-
-	for x = 0 to 3		'4 x Current Oversampling
-	ADCON0.1 = 1  		'Start ADC conversion                                 
-	while ADCON0.1 = 1	'Wait for ADC DONE
-	wend
-
-    VarB.highbyte = ADRESH  'Move HIGH byte of result to Variable (0-1023 10bit)
-    VarB.lowbyte = ADRESL  	'Move LOW byte of result to Variable  (0-1023 10bit)
-
-	BatCurrent = BatCurrent + VarB		'Add Current to accumulated Current 
-	Next x				 'Repeat loop until 4 samples obtained
-    ADCON0 = %00000000	     'DISABLE ADC MODULE on AN1
-	BatCurrent = BatCurrent >> 2   'Divide by 4, BatCurrent is now 0-1024
-	
+	if OptInput = 0 then
+    	BatCurrent = 0		' Reset Current oversampling accumulator to 0 (Zero)
+        ADCON0 = %00000001	' ENABLE ADC MODULE on AN0
+    
+    	for x = 0 to 3		'4 x Current Oversampling
+    	ADCON0.1 = 1  		'Start ADC conversion                                 
+    	while ADCON0.1 = 1	'Wait for ADC DONE
+    	wend
+    
+        VarB.highbyte = ADRESH  'Move HIGH byte of result to Variable (0-1023 10bit)
+        VarB.lowbyte = ADRESL  	'Move LOW byte of result to Variable  (0-1023 10bit)
+    
+    	BatCurrent = BatCurrent + VarB		'Add Current to accumulated Current 
+    	Next x				 'Repeat loop until 4 samples obtained
+        ADCON0 = %00000000	     'DISABLE ADC MODULE on AN1
+    	BatCurrent = BatCurrent >> 2   'Divide by 4, BatCurrent is now 0-1024
+	endif
 return					 'Return to main program loop
 	
 OutputCurrent:					'Send current on master bus
-
-    hserout [dec batcurrent , ","] ' Output raw 10 bit adc value followed by ","
-   
+    if OptInput = 0 then
+        hserout [dec batcurrent , ","] ' Output raw 10 bit adc value followed by ","
+    endif
 return					'Return to main program loop
 
 
