@@ -1,5 +1,5 @@
-update=18/03/2013 14:30:13
-last_client=eeschema
+update=18/03/2013 14:37:51
+last_client=kicad
 [pcbnew]
 [pcbnew/libraries]
 LibName1=Kicad/Footprints
@@ -9,11 +9,9 @@ version=1
 NetIExt=net
 [cvpcb/libraries]
 EquName1=devcms
-[general]
-version=1
 [eeschema]
 version=1
-LibDir=../evBMS/Kicad
+LibDir=Kicad
 NetFmtName=PcbnewAdvanced
 RptD_X=0
 RptD_Y=100
@@ -51,3 +49,5 @@ LibName28=atmel
 LibName29=contrib
 LibName30=valves
 LibName31=symbols
+[general]
+version=1
