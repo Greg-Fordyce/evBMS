@@ -1,0 +1,36 @@
+EESchema-DOCLIB  Version 2.0  Date: Sun 17 Mar 2013 21:10:37 GMT
+#
+$CMP BI_LED
+D LED DOUBLE type Bicolore
+K LED
+$ENDCMP
+#
+$CMP C
+D Condensateur non polarise
+$ENDCMP
+#
+$CMP CONN_1
+D 1 pin
+K CONN
+$ENDCMP
+#
+$CMP DB15
+K CONN
+$ENDCMP
+#
+$CMP ICSP
+D Symbole general de connecteur
+K CONN
+$ENDCMP
+#
+$CMP MAX202
+F maxim/max200-max213.pdf
+$ENDCMP
+#
+$CMP MAX232
+D Driver de Ligne RS232
+K RS232
+F maxim/MAX220-MAX249.pdf
+$ENDCMP
+#
+#End Doc Library
