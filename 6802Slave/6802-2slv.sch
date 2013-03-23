@@ -1,4 +1,4 @@
-EESchema Schematic File Version 2  date 18/03/2013 14:37:45
+EESchema Schematic File Version 2  date 23/03/2013 20:33:18
 LIBS:power
 LIBS:device
 LIBS:transistors
@@ -37,7 +37,7 @@ $Descr A4 11693 8268
 encoding utf-8
 Sheet 1 1
 Title "LTC6802-2 based slave cell monitor"
-Date "17 mar 2013"
+Date "23 mar 2013"
 Rev "D"
 Comp "www.go-ev.co.uk"
 Comment1 "(c) Greg Fordyce 2013"
@@ -1664,7 +1664,7 @@ Wire Notes Line
 Wire Notes Line
 	5400 5550 5400 4700
 Text Notes 5400 5700 0    60   ~ 0
-For temperature sensor 1 on J1-pin15, \nomit R29 when using diodes. If using \nthermistor, add R14a to circuit.\n\nFor temperature sensor 2 on J1-pin8, \nomit R30 when using diodes. If using \nthermistor, add R15a to circuit.
+For temperature sensor 1 on J1-pin15, \nomit R29 when using diodes. If using \nthermistor, add R29 to circuit.\n\nFor temperature sensor 2 on J1-pin8, \nomit R30 when using diodes. If using \nthermistor, add R30 to circuit.
 $Comp
 L R R27
 U 1 1 514634DB
