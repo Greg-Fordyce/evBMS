@@ -1,6 +1,6 @@
   '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
- ' 6802 Master Version 0.08 Alpha
- ' (c) Greg Fordyce 2013 - 04 July
+ ' 6802 Master Version 0.09 Alpha
+ ' (c) Greg Fordyce 2013 - 05 July
  '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 Cls
@@ -14,7 +14,7 @@ CellNo = 48
 
 CByte = CellNo * 4
 Mode 4
-Print @(25,100) "6802 Master Version 0.08 Alpha"
+Print @(25,100) "6802 Master Version 0.09 Alpha"
 
 Pause 3000
 
@@ -38,7 +38,23 @@ Timer = 0
 Main:
 Do
 
-  If Loc(#1) = CByte-1 Then CellV
+  If Loc(#1) = (CByte-1) THEN 
+    CVData$ = Input$(CByte,#1)
+    i = 4
+      Do
+      If Mid$(CVData$,i,1) <> "," Then exit
+      i = i + 4
+      Loop Until i >= CByte
+
+      If i = CByte Then 
+        CellV
+      else
+        SerialError = serialerror + 1
+        Print @(191,15) serialerror
+        timer = 0
+        Print #1,Chr$(200);   ' Read cell voltage register
+      endif  
+  endif
 '    If Loc(#2) >= 67 Then CougarRTD
 '    If Loc(#2) >= 67 Then RTD
   keypress$ = Inkey$  'read keyboard press
@@ -46,7 +62,12 @@ Do
   If keypress$= "S" Then SaveBMP "image1.bmp"
   If keypress$ = Chr$(131) Then RightArrow
   If keypress$ = Chr$(130) Then LeftArrow
-  If Timer > 500 Then GoTo Watchdog
+  If Timer > 500 Then 
+      SerialError = serialerror + 1
+      Print @(191,15) serialerror
+      timer = 0
+      Print #1,Chr$(200);   ' Read cell voltage register
+    endif
 
 Loop
 '  Data string format from controller
@@ -103,17 +124,10 @@ End Sub
 
 Sub CellV
     Local i, arg$, x$, j
-    x$ = Input$(CByte,#1)
-    i = 4
-      Do
-      If Mid$(X$,i,1) <> "," Then j = 1
-      i = i + 4
-      Loop Until i >= CByte
-
-      If j = 1 Then GoTo watchdog
+   
 
     For i = 1 To CellNo
-          CellV(i) = Val(Mid$(x$,i*4-3,3))
+          CellV(i) = Val(Mid$(CVData$,i*4-3,3))
           CellV(i) = CellV(i) / 100
         Next i                             ' move to the next data field
     'Close #1
@@ -186,12 +200,3 @@ Sub LeftArrow
   CellSelect = CellSelect - 1
   If CellSelect < 0 Then CellSelect = 0
 End Sub
-
-Watchdog:
-Close #1
-'Close #2
-'SetTick 0,0
-SerialError = serialerror + 1
-Print @(191,15) serialerror
-GoTo start
-IReturn
